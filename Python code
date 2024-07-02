@@ -1,0 +1,130 @@
+# -*- coding: utf-8 -*-
+import pyomo.environ as pyo
+from pyomo.opt import SolverFactory
+
+model = pyo.ConcreteModel()
+
+#%% Defining Sets
+model.i = pyo.Set(initialize=['N1', 'N2', 'N3', 'N4'], doc='Industrial Nodes')
+model.k = pyo.Set(initialize=['W1', 'W2'], doc='Waste Type')
+model.j = pyo.Set(initialize=['N1', 'N2', 'N3', 'N4'], doc='Industrial Nodes for road construction')
+
+#%% Defining Parameters
+
+# Units of industrial waste type in tons
+gwtab = {('W1', 'N1'): 100, ('W1', 'N2'): 150, ('W1', 'N3'): 120, ('W1', 'N4'): 180,
+         ('W2', 'N1'): 200, ('W2', 'N2'): 250, ('W2', 'N3'): 180, ('W2', 'N4'): 220}
+model.uk = pyo.Param(model.k, model.i, initialize=gwtab, doc='Units of industrial waste type in tons')
+
+# Average cost per unit waste type k for landfill
+kwtab = {('W1', 'N1'): 400, ('W1', 'N2'): 450, ('W1', 'N3'): 350, ('W1', 'N4'): 500,
+         ('W2', 'N1'): 600, ('W2', 'N2'): 550, ('W2', 'N3'): 500, ('W2', 'N4'): 650}
+model.kw = pyo.Param(model.k, model.i, initialize=kwtab, doc='Average cost per unit waste type k for landfill in INR')
+
+# Fixed cost for recycling plant
+fwtab = {('W1', 'N1'): 800000, ('W1', 'N2'): 1200000, ('W1', 'N3'): 1000000, ('W1', 'N4'): 1100000}
+model.fw = pyo.Param(model.k, model.i, initialize=fwtab, doc='Fixed cost at recycling plant for waste 1')
+
+# Variable cost of recycling plant
+vwtab = {('W1', 'N1'): 150, ('W1', 'N2'): 200, ('W1', 'N3'): 180, ('W1', 'N4'): 220}
+model.vw = pyo.Param(model.k, model.i, initialize=vwtab, doc='Variable cost/ton at recycling plant for waste 1')
+
+# Maximum capacity of recycling
+Mwr = {'N1': 500, 'N2': 600, 'N3': 550, 'N4': 650}
+model.mwr = pyo.Param(model.i, initialize=Mwr, doc='Maximum capacity in tons of recycled waste at each node')
+
+# Fixed costs for road construction (including both directions with the same cost)
+frtab = {('N1', 'N2'): 150000, ('N1', 'N3'): 200000, ('N1', 'N4'): 250000,
+         ('N2', 'N1'): 150000, ('N2', 'N3'): 180000, ('N2', 'N4'): 220000,
+         ('N3', 'N1'): 200000, ('N3', 'N2'): 180000, ('N3', 'N4'): 220000,
+         ('N4', 'N1'): 250000, ('N4', 'N2'): 220000, ('N4', 'N3'): 220000}
+model.fr = pyo.Param(model.i, model.j, initialize=frtab, doc='Fixed cost of road construction for different routes')
+
+# Maximum capacity tons for waste on road for waste 1
+Mw1 = {('N1', 'N2'): 300, ('N1', 'N3'): 400, ('N1', 'N4'): 350,
+       ('N2', 'N1'): 300, ('N2', 'N3'): 300, ('N2', 'N4'): 320,
+       ('N3', 'N1'): 400, ('N3', 'N2'): 300, ('N3', 'N4'): 360,
+       ('N4', 'N1'): 350, ('N4', 'N2'): 320, ('N4', 'N3'): 360}
+model.mw1 = pyo.Param(model.i, model.j, initialize=Mw1, doc='Maximum capacity tons for waste on road for waste 1')
+
+# Maximum capacity tons for waste on road for waste 2
+Mw2 = {('N1', 'N2'): 350, ('N1', 'N3'): 450, ('N1', 'N4'): 400,
+       ('N2', 'N1'): 350, ('N2', 'N3'): 320, ('N2', 'N4'): 360,
+       ('N3', 'N1'): 450, ('N3', 'N2'): 320, ('N3', 'N4'): 360,
+       ('N4', 'N1'): 400, ('N4', 'N2'): 360, ('N4', 'N3'): 400}
+model.mw2 = pyo.Param(model.i, model.j, initialize=Mw2, doc='Maximum capacity tons for waste on road for waste 2')
+
+# Variable road costs (direction specific)
+vij1 = {('N1', 'N2'): 35, ('N1', 'N3'): 40, ('N1', 'N4'): 45,
+        ('N2', 'N1'): 40, ('N2', 'N3'): 35, ('N2', 'N4'): 30,
+        ('N3', 'N1'): 40, ('N3', 'N2'): 35, ('N3', 'N4'): 30,
+        ('N4', 'N1'): 45, ('N4', 'N2'): 30, ('N4', 'N3'): 35}
+vij2 = {('N1', 'N2'): 45, ('N1', 'N3'): 50, ('N1', 'N4'): 55,
+        ('N2', 'N1'): 50, ('N2', 'N3'): 40, ('N2', 'N4'): 35,
+        ('N3', 'N1'): 50, ('N3', 'N2'): 40, ('N3', 'N4'): 35,
+        ('N4', 'N1'): 55, ('N4', 'N2'): 35, ('N4', 'N3'): 40}
+vji1 = {('N2', 'N1'): 40, ('N3', 'N1'): 40, ('N4', 'N1'): 45,
+        ('N1', 'N2'): 35, ('N1', 'N3'): 40, ('N1', 'N4'): 45,
+        ('N3', 'N2'): 35, ('N4', 'N2'): 30, ('N4', 'N3'): 35,
+        ('N1', 'N3'): 40, ('N2', 'N3'): 35, ('N3', 'N4'): 30}
+vji2 = {('N2', 'N1'): 50, ('N3', 'N1'): 50, ('N4', 'N1'): 55,
+        ('N1', 'N2'): 45, ('N1', 'N3'): 50, ('N1', 'N4'): 55,
+        ('N3', 'N2'): 40, ('N4', 'N2'): 35, ('N4', 'N3'): 40,
+        ('N2', 'N3'): 40, ('N1', 'N3'): 50, ('N3', 'N4'): 35}
+
+model.vij1 = pyo.Param(model.i, model.j, initialize=vij1, doc='Variable cost/ton from i to j for waste 1')
+model.vij2 = pyo.Param(model.i, model.j, initialize=vij2, doc='Variable cost/ton from i to j for waste 2')
+model.vji1 = pyo.Param(model.i, model.j, initialize=vji1, doc='Variable cost/ton from j to i for waste 1')
+model.vji2 = pyo.Param(model.i, model.j, initialize=vji2, doc='Variable cost/ton from j to i for waste 2')
+
+# Amount paid for recycled waste
+r = {'N1': 400, 'N2': 400, 'N3': 400, 'N4': 400}
+model.r = pyo.Param(model.i, initialize=r, doc='Amount paid for recycled waste')
+
+#%% Defining Variables
+model.x = pyo.Var(model.i, model.k, domain=pyo.NonNegativeReals, doc='Waste to be disposed at the landfill')
+model.a = pyo.Var(model.i, model.k, domain=pyo.NonNegativeReals, doc='Waste to be recycled at plants')
+model.y = pyo.Var(model.i, model.j, domain=pyo.Binary, doc='Binary decision variable for road construction')
+model.z = pyo.Var(model.i, model.j, model.k, domain=pyo.NonNegativeReals, doc='Waste transported on each road')
+
+#%% Defining Objective Function
+def objective_rule(model):
+    landfill_cost = sum(model.kw[k, i] * model.x[i, k] for k in model.k for i in model.i)
+    recycle_cost = sum(model.fw['W1', i] + model.a[i, 'W1'] * model.vw['W1', i] for i in model.i)
+    road_cost = sum(model.fr[i, j] * model.y[i, j] for i in model.i for j in model.j if i != j)
+    road_transport_cost = sum(model.z[i, j, k] * (model.vij1[i, j] if k == 'W1' else model.vij2[i, j]) for i in model.i for j in model.j if i != j for k in model.k)
+    income_recycle = sum(model.x[i, 'W1'] * model.r[i] for i in model.i)
+    return landfill_cost + recycle_cost + road_cost + road_transport_cost - income_recycle
+
+model.objective = pyo.Objective(rule=objective_rule, sense=pyo.minimize)
+
+#%% Defining Constraints
+
+# Recycling capacity constraint
+def recycling_capacity_rule(model, i):
+    return sum(model.a[i, 'W1'] for i in model.i) <= model.mwr[i]
+
+model.recycling_capacity = pyo.Constraint(model.i, rule=recycling_capacity_rule)
+
+# Waste balance constraint at each node
+def waste_balance_rule(model, i, k):
+    return model.uk[k, i] == model.x[i, k] + sum(model.z[i, j, k] - model.z[j, i, k] for j in model.j if i != j)
+
+model.waste_balance = pyo.Constraint(model.i, model.k, rule=waste_balance_rule)
+
+# Road capacity constraints
+def road_capacity_rule(model, i, j, k):
+    if i != j:
+        return model.z[i, j, k] <= model.mw1[i, j] if k == 'W1' else model.z[i, j, k] <= model.mw2[i, j]
+    else:
+        return pyo.Constraint.Skip
+
+model.road_capacity = pyo.Constraint(model.i, model.j, model.k, rule=road_capacity_rule)
+
+#%% Solve the model
+opt = SolverFactory('cplex')
+results = opt.solve(model)
+
+# Display optimal cost
+optimal_cost = pyo.value(model.objective)
+print(f"Optimal Cost: {optimal_cost:.2f}")
